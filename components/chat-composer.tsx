@@ -5,7 +5,6 @@ import {
   BookOpenText,
   Paperclip,
   PaperPlaneTilt,
-  Plus,
   X,
 } from "@phosphor-icons/react"
 import { useRef, useState } from "react"
@@ -63,16 +62,6 @@ export function ChatComposer() {
               title="Attach a file"
             >
               <Paperclip size={16} />
-            </Button>
-            <div className="h-4 w-px bg-border" />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Start a new chat"
-              title="New chat"
-            >
-              <Plus size={16} />
             </Button>
             <Button
               type="button"
