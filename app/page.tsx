@@ -12,7 +12,7 @@ import { SiteHeader } from "@/components/site-header"
 
 export default function Home() {
   return (
-    <main className="min-h-screen overflow-hidden bg-background">
+    <main className="min-h-screen bg-background">
       <SiteHeader />
 
       <section className="relative isolate">

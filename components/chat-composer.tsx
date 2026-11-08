@@ -1,88 +1,68 @@
 "use client"
 
-import {
-  ArrowClockwise,
-  BookOpenText,
-  Paperclip,
-  PaperPlaneTilt,
-  X,
-} from "@phosphor-icons/react"
-import { useRef, useState } from "react"
+import { Paperclip, PaperPlaneTilt } from "@phosphor-icons/react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 
-export function ChatComposer() {
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [file, setFile] = useState<File | null>(null)
+export function ChatComposer({
+  disabled = false,
+  clarity,
+  onSend,
+}: {
+  disabled?: boolean
+  clarity?: number
+  onSend: (message: string) => void
+}) {
+  const [message, setMessage] = useState("")
 
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    setFile(event.target.files?.[0] ?? null)
-    event.target.value = ""
+  function submit() {
+    const trimmed = message.trim()
+    if (!trimmed || disabled) return
+    onSend(trimmed)
+    setMessage("")
   }
 
   return (
     <div className="shrink-0 border-t border-border/70 p-4">
       <div className="rounded-xl border border-border bg-background/70 p-2 shadow-sm">
-        {file && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs">
-            <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate">{file.name}</span>
-            <span className="shrink-0 text-muted-foreground">
-              {(file.size / 1024 / 1024).toFixed(1)} MB
-            </span>
-            <button
-              type="button"
-              onClick={() => setFile(null)}
-              className="rounded-sm text-muted-foreground transition-colors hover:text-foreground"
-              aria-label={`Remove ${file.name}`}
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-        )}
         <textarea
+          value={message}
+          onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault()
+              submit()
+            }
+          }}
+          disabled={disabled}
           aria-label="Message Halite"
           placeholder="Ask anything about your business..."
-          className="min-h-16 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground"
+          className="min-h-16 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <div className="flex items-center justify-between px-1 pt-2">
-          <div className="flex items-center gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="sr-only"
-              onChange={handleFileChange}
-              aria-label="Attach a file"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Attach a file"
-              title="Attach a file"
+        <div className="flex items-center justify-between gap-3 px-1 pt-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <label
+              htmlFor="chat-attachment"
+              className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Attach file"
             >
-              <Paperclip size={16} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="View context"
-              title="View context"
-            >
-              <BookOpenText size={16} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Restart chat"
-              title="Restart chat"
-            >
-              <ArrowClockwise size={16} />
-            </Button>
+              <Paperclip size={17} />
+              <span className="sr-only">Attach file</span>
+            </label>
+            <input id="chat-attachment" type="file" className="sr-only" />
+            {clarity !== undefined && (
+              <div className="flex min-w-0 flex-1 items-center gap-2" aria-label={`${Math.round(clarity)}% clear`}>
+                <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                  <span
+                    className="block h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${Math.min(100, Math.max(0, clarity))}%` }}
+                  />
+                </span>
+                <span className="shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground">{Math.round(clarity)}% clear</span>
+              </div>
+            )}
           </div>
-          <Button type="button" size="icon-sm" aria-label="Send message">
+          <Button type="button" size="icon-sm" onClick={submit} disabled={disabled || !message.trim()} aria-label="Send message">
             <PaperPlaneTilt size={16} weight="fill" />
           </Button>
         </div>
