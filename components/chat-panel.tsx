@@ -67,7 +67,7 @@ function AssistantLoading({ title = "Thinking", progress, message }: { title?: s
 }
 
 export function ChatPanel() {
-  const { setSolutionApps, setSuggestedProblems, toolSearchStatus, toolSearchProgress, setToolSearchProgress } = useAppSession()
+  const { setSolutionApps, setSuggestedProblems, toolSearchProgress, setToolSearchProgress } = useAppSession()
   const [session, setSession] = useState<ChatSession | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [tools, setTools] = useState<ToolsState | null>(null)
@@ -80,7 +80,7 @@ export function ChatPanel() {
     () => getToolRecommendations(tools?.result ?? session?.solution_apps ?? session?.apps),
     [session?.apps, session?.solution_apps, tools?.result]
   )
-  const isSearchingTools = toolSearchStatus === "running" || tools?.status === "running"
+  const isSearchingTools = tools?.status === "running"
   const activeProgress = toolSearchProgress ?? chatProgress
 
   useEffect(() => {

@@ -2,13 +2,12 @@
 
 import {
   ArrowsDownUp,
+  Check,
   FileCsv,
   FileDoc,
   FilePdf,
   FileText,
   FolderOpen,
-  GridFour,
-  List,
   Plus,
   Trash,
   UploadSimple,
@@ -17,10 +16,9 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent 
 import { SiteHeader } from "@/components/site-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { analyzeDataset, deleteDatasetFile, getReport, uploadFiles, type UploadFile } from "@/lib/backend"
+import { analyzeDataset, deleteDatasetFile, deleteDatasetFiles, getReport, uploadFiles, type UploadFile } from "@/lib/backend"
 
 type StoredFile = UploadFile & { localName: string; size: number; lastModified: number; type: string }
-type ViewMode = "list" | "grid"
 type SortOrder = "newest" | "oldest"
 
 function iconForFile(name: string) {
@@ -45,6 +43,14 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+function fileTitle(filename: string) {
+  return filename.replace(/\.[^./]+$/, "")
+}
+
+function fileType(filename: string) {
+  return filename.split(".").pop()?.toUpperCase() || "FILE"
+}
+
 function reportFiles(files: UploadFile[] = []): StoredFile[] {
   return files.map((file, index) => {
     const localName = file.name ?? file.filename ?? `Uploaded file ${index + 1}`
@@ -62,11 +68,11 @@ export default function ContextPage() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [files, setFiles] = useState<StoredFile[]>([])
   const [datasetId, setDatasetId] = useState<string | null>(null)
-  const [view, setView] = useState<ViewMode>("list")
   const [query, setQuery] = useState("")
   const [sortOrder, setSortOrder] = useState<SortOrder>("newest")
   const [isUploading, setIsUploading] = useState(false)
   const [deletingFile, setDeletingFile] = useState<string | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
   const [isDragActive, setIsDragActive] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -112,6 +118,25 @@ export default function ContextPage() {
         .sort((a, b) => (sortOrder === "newest" ? b.lastModified - a.lastModified : a.lastModified - b.lastModified)),
     [files, query, sortOrder]
   )
+  const allVisibleSelected = visibleFiles.length > 0 && visibleFiles.every((file) => selectedFiles.has(file.localName))
+
+  function toggleSelected(filename: string) {
+    setSelectedFiles((current) => {
+      const next = new Set(current)
+      if (next.has(filename)) next.delete(filename)
+      else next.add(filename)
+      return next
+    })
+  }
+
+  function toggleAllVisible() {
+    setSelectedFiles((current) => {
+      const next = new Set(current)
+      if (allVisibleSelected) visibleFiles.forEach((file) => next.delete(file.localName))
+      else visibleFiles.forEach((file) => next.add(file.localName))
+      return next
+    })
+  }
 
   async function uploadSelectedFiles(selected: File[]) {
     if (!selected.length) return
@@ -124,6 +149,7 @@ export default function ContextPage() {
       setStatus("Files uploaded. Running analysis…")
       const report = await analyzeDataset(ingest.dataset_id)
       setFiles(reportFiles(report.files ?? ingest.files))
+      setSelectedFiles(new Set())
       const params = new URLSearchParams(window.location.search)
       params.set("dataset_id", ingest.dataset_id)
       window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`)
@@ -146,9 +172,35 @@ export default function ContextPage() {
       const dataset = await deleteDatasetFile(datasetId, file.localName)
       const report = await analyzeDataset(datasetId)
       setFiles(reportFiles(report.files ?? dataset.files))
+      setSelectedFiles((current) => {
+        const next = new Set(current)
+        next.delete(file.localName)
+        return next
+      })
       setStatus("File deleted. Your business context was updated.")
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Delete failed")
+      setStatus(null)
+    } finally {
+      setDeletingFile(null)
+    }
+  }
+
+  async function handleDeleteSelected() {
+    if (!datasetId || deletingFile || selectedFiles.size === 0) return
+    const filenames = Array.from(selectedFiles)
+    if (!window.confirm(`Delete ${filenames.length} selected file${filenames.length === 1 ? "" : "s"}?`)) return
+    setDeletingFile("selected")
+    setError(null)
+    setStatus(`Deleting ${filenames.length} selected files…`)
+    try {
+      const dataset = await deleteDatasetFiles(datasetId, filenames)
+      const report = await analyzeDataset(datasetId)
+      setFiles(reportFiles(report.files ?? dataset.files))
+      setSelectedFiles(new Set())
+      setStatus("Selected files deleted. Your business context was updated.")
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Bulk delete failed")
       setStatus(null)
     } finally {
       setDeletingFile(null)
@@ -220,8 +272,18 @@ export default function ContextPage() {
                   <Button variant="outline" size="icon" className="size-10 text-muted-foreground hover:text-foreground" onClick={() => setSortOrder((order) => (order === "newest" ? "oldest" : "newest"))} aria-label="Change file date order">
                     <ArrowsDownUp size={15} />
                   </Button>
-                  <Button variant="outline" size="icon" className="size-10 text-muted-foreground hover:text-foreground" onClick={() => setView((current) => (current === "list" ? "grid" : "list"))} aria-label="Change file view">
-                    {view === "list" ? <List size={17} /> : <GridFour size={17} />}
+                  <Button variant={allVisibleSelected ? "default" : "outline"} size="default" className={`h-10 ${allVisibleSelected ? "" : "text-muted-foreground hover:text-foreground"}`} onClick={toggleAllVisible}>
+                    {allVisibleSelected ? "Deselect all" : "Select all"}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="default"
+                    className="h-10"
+                    disabled={!selectedFiles.size || Boolean(deletingFile)}
+                    onClick={() => void handleDeleteSelected()}
+                  >
+                    <Trash size={15} />
+                    Delete{selectedFiles.size ? ` (${selectedFiles.size})` : ""}
                   </Button>
                 </div>
               )}
@@ -236,14 +298,20 @@ export default function ContextPage() {
                   {query ? "No files match your search." : isDragActive ? "Drop your business files here." : "Upload business files or drop them here to give Halite context."}
                 </p>
               </div>
-            ) : view === "list" ? (
+            ) : (
               <div className="space-y-2.5">
                 {visibleFiles.map((file, index) => (
                   <div key={`${file.localName}-${file.domain ?? file.type}-${file.lastModified}-${index}`} className="flex items-center gap-3 rounded-lg border border-border/70 bg-background/30 p-3">
+                    <label className="flex shrink-0 cursor-pointer items-center" aria-label={`Select ${file.localName}`}>
+                      <input type="checkbox" checked={selectedFiles.has(file.localName)} onChange={() => toggleSelected(file.localName)} className="sr-only" />
+                      <span className={`flex size-4 items-center justify-center rounded-[4px] border transition-colors ${selectedFiles.has(file.localName) ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background/60"}`}>
+                        {selectedFiles.has(file.localName) && <Check size={11} weight="bold" />}
+                      </span>
+                    </label>
                     <FileIcon file={file} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{file.localName}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{(file.domain ?? file.type) || "Uploaded file"} · {formatSize(file.size)}</p>
+                      <p className="truncate text-sm font-medium">{fileTitle(file.localName)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{fileType(file.localName)} · {formatSize(file.size)}</p>
                     </div>
                     <time className="hidden text-xs text-muted-foreground sm:block">{new Date(file.lastModified).toLocaleDateString()}</time>
                     <Button
@@ -255,27 +323,6 @@ export default function ContextPage() {
                       aria-label={`Delete ${file.localName}`}
                     >
                       <Trash size={16} />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleFiles.map((file, index) => (
-                  <div key={`${file.localName}-${file.domain ?? file.type}-${file.lastModified}-${index}`} className="rounded-xl border border-border/70 bg-background/30 p-4">
-                    <FileIcon file={file} large />
-                    <p className="mt-4 truncate text-sm font-medium">{file.localName}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{(file.domain ?? file.type) || "Uploaded file"} · {formatSize(file.size)}</p>
-                    <time className="mt-3 block text-xs text-muted-foreground">{new Date(file.lastModified).toLocaleDateString()}</time>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="mt-3 text-muted-foreground hover:text-destructive"
-                      onClick={() => void handleDeleteFile(file)}
-                      disabled={Boolean(deletingFile)}
-                    >
-                      <Trash size={15} />
-                      Delete
                     </Button>
                   </div>
                 ))}

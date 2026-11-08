@@ -1,10 +1,11 @@
 "use client"
 
-import { ArrowUpRight } from "@phosphor-icons/react"
+import { ArrowUpRight, CircleNotch, Globe } from "@phosphor-icons/react"
 import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAppSession } from "@/components/app-session"
 import { ToolDetailsDialog } from "@/components/tool-details-dialog"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { analyzeDataset, getReport, streamToolRecommendations, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
 
@@ -18,12 +19,14 @@ function problemDescription(problem: ReportProblem | string) {
 }
 
 function toolLogoCandidates(tool: ToolRecommendation) {
-  const candidates = tool.tool_logo_url ? [tool.tool_logo_url] : []
+  const candidates = tool.tool_logo_url && /^https?:\/\//i.test(tool.tool_logo_url)
+    ? [tool.tool_logo_url]
+    : []
   try {
-    const hostname = new URL(tool.tool_home_page).hostname
-    candidates.push(`https://icons.duckduckgo.com/ip3/${hostname}.ico`)
+    const hostname = new URL(tool.tool_home_page).hostname.replace(/^www\./, "")
+    candidates.push(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`)
   } catch {
-    return candidates
+    // Use initials when the recommendation does not contain a valid homepage.
   }
   return candidates
 }
@@ -96,11 +99,29 @@ function ToolRow({ tool }: { tool: ToolRecommendation }) {
   )
 }
 
-function ProblemCard({ problem, tools, finalRecommendation }: { problem: ReportProblem | string; tools: ToolRecommendation[]; finalRecommendation?: string }) {
+function ProblemCard({
+  problem,
+  tools,
+  finalRecommendation,
+  onFindTools,
+  isSearching,
+  progress,
+  elapsedSeconds = 0,
+}: {
+  problem: ReportProblem | string
+  tools: ToolRecommendation[]
+  finalRecommendation?: string
+  onFindTools?: () => void
+  isSearching?: boolean
+  progress?: { message: string; progress: number } | null
+  elapsedSeconds?: number
+}) {
   return (
     <Card className="gap-0 overflow-hidden border-border/70 border-l-2 border-l-primary/40 bg-card/60 py-0">
       <CardHeader className="border-b border-border/60 bg-primary/[0.04] px-5 py-5 sm:px-6">
-        <CardTitle className="text-base">{problemTitle(problem)}</CardTitle>
+        <div className="flex items-start justify-between gap-3">
+          <CardTitle className="text-base">{problemTitle(problem)}</CardTitle>
+        </div>
         <CardDescription className="mt-1 text-xs">{problemDescription(problem)}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2.5 px-4 py-4 sm:px-5">
@@ -109,7 +130,34 @@ function ProblemCard({ problem, tools, finalRecommendation }: { problem: ReportP
             <span className="font-medium text-foreground">Recommended starting point: </span>{finalRecommendation}
           </div>
         )}
-        {tools.length > 0 ? tools.map((tool, index) => <ToolRow key={`${tool.tool_name}-${index}`} tool={tool} />) : (
+        {tools.length > 0 ? tools.map((tool, index) => <ToolRow key={`${tool.tool_name}-${index}`} tool={tool} />) : onFindTools ? (
+          <Button
+            variant="outline"
+            disabled={isSearching}
+            onClick={onFindTools}
+            className="h-auto min-h-12 w-full justify-between rounded-xl border-primary/30 bg-primary/[0.06] px-4 py-3 text-sm font-medium text-foreground shadow-sm transition-all hover:border-primary/60 hover:bg-primary/[0.12] hover:shadow-md"
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+              {isSearching ? <CircleNotch className="shrink-0 animate-spin text-primary" /> : <Globe className="shrink-0 text-primary" />}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">
+                  {isSearching
+                    ? `${progress?.message ?? "Researching tools…"} (${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, "0")})`
+                    : "Research tools"}
+                </span>
+                {isSearching && progress && (
+                  <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-primary/15">
+                    <span
+                      className="block h-full rounded-full bg-primary transition-all duration-500"
+                      style={{ width: `${Math.min(100, Math.max(0, progress.progress))}%` }}
+                    />
+                  </span>
+                )}
+              </span>
+            </span>
+            {!isSearching && <ArrowUpRight className="text-muted-foreground" size={16} />}
+          </Button>
+        ) : (
           <p className="px-2 py-4 text-xs text-muted-foreground">Keep chatting with Halite to discover tools for this problem.</p>
         )}
       </CardContent>
@@ -124,18 +172,26 @@ export default function App() {
   const [toolsError, setToolsError] = useState<string | null>(null)
   const toolSearchController = useRef<AbortController | null>(null)
   const maxProgress = useRef(0)
-  const { solutionApps, suggestedProblems, setToolSearchStatus, setToolSearchProgress } = useAppSession()
+  const [activeProblem, setActiveProblem] = useState<string | null>(null)
+  const [researchElapsedSeconds, setResearchElapsedSeconds] = useState(0)
+  const { solutionApps, suggestedProblems, setToolSearchStatus, toolSearchProgress, setToolSearchProgress } = useAppSession()
   const problems = useMemo(
     () => (report?.top_problems?.length ? report.top_problems : suggestedProblems),
     [report?.top_problems, suggestedProblems]
   )
 
   useEffect(() => {
+    if (!activeProblem) return
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => {
+      setResearchElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [activeProblem])
+
+  useEffect(() => {
     const datasetId = new URLSearchParams(window.location.search).get("dataset_id")
     if (!datasetId) return
-    if (toolSearchController.current && !toolSearchController.current.signal.aborted) return
-    const controller = new AbortController()
-    toolSearchController.current = controller
     getReport(datasetId)
       .catch((reason: Error) => {
         if (reason.message.includes("dataset not analyzed yet")) {
@@ -145,31 +201,6 @@ export default function App() {
       })
       .then((nextReport) => {
         setReport(nextReport)
-        if (!nextReport.top_problems?.length) {
-          setToolSearchStatus("idle")
-          return null
-        }
-        setToolsLoading(true)
-        setToolSearchStatus("running")
-        if (maxProgress.current === 0) {
-          setToolSearchProgress({ phase: "preparing", message: "Preparing tool research…", progress: 0 })
-        }
-        return streamToolRecommendations(
-          datasetId,
-          nextReport.alpha ?? 0.7,
-          (progress) => {
-            if (progress.progress < maxProgress.current) return
-            maxProgress.current = progress.progress
-            setToolSearchProgress(progress)
-          },
-          controller.signal,
-        )
-      })
-      .then((toolResponse) => {
-        if (!toolResponse) return
-        setToolGroups(toolResponse.recommendations)
-        setToolSearchStatus("ready")
-        setToolSearchProgress({ phase: "complete", message: "Recommendations ready.", progress: 100 })
       })
       .catch((reason: Error) => {
         if (reason.name !== "AbortError") {
@@ -180,22 +211,57 @@ export default function App() {
             setReport(null)
             setToolGroups([])
             setToolsError(null)
-            setToolSearchStatus("idle")
             setToolSearchProgress(null)
             return
           }
           setToolsError(reason.message)
-          setToolSearchStatus("error")
         }
       })
-      .finally(() => {
-        setToolsLoading(false)
-      })
-    return () => {
-      controller.abort()
-      if (toolSearchController.current === controller) toolSearchController.current = null
+    return () => toolSearchController.current?.abort()
+  }, [setToolSearchProgress])
+
+  async function findTools(problem: ReportProblem | string) {
+    const datasetId = new URLSearchParams(window.location.search).get("dataset_id")
+    if (!datasetId || toolSearchController.current) return
+    const label = problemTitle(problem)
+    const controller = new AbortController()
+    toolSearchController.current = controller
+    maxProgress.current = 0
+    setActiveProblem(label)
+    setResearchElapsedSeconds(0)
+    setToolsLoading(true)
+    setToolsError(null)
+    setToolSearchStatus("running")
+    setToolSearchProgress({ phase: "preparing", message: "Preparing tool research…", progress: 0 })
+    try {
+      const result = await streamToolRecommendations(
+        datasetId,
+        report?.alpha ?? 0.7,
+        (progress) => {
+          if (progress.progress < maxProgress.current) return
+          maxProgress.current = progress.progress
+          setToolSearchProgress(progress)
+        },
+        controller.signal,
+        label,
+      )
+      setToolGroups((current) => [
+        ...current.filter((group) => group.problem !== result.recommendations[0]?.problem),
+        ...result.recommendations,
+      ])
+      setToolSearchStatus("ready")
+      setToolSearchProgress({ phase: "complete", message: "Recommendations ready.", progress: 100 })
+    } catch (reason) {
+      if (reason instanceof Error && reason.name !== "AbortError") {
+        setToolsError(reason.message)
+        setToolSearchStatus("error")
+      }
+    } finally {
+      setToolsLoading(false)
+      setActiveProblem(null)
+      toolSearchController.current = null
     }
-  }, [setToolSearchProgress, setToolSearchStatus])
+  }
   const dashboardTools = toolGroups.flatMap((group) => group.tools)
   const toolsForProblem = (problem: ReportProblem | string) => {
     const label = problemTitle(problem).toLowerCase()
@@ -228,6 +294,10 @@ export default function App() {
                 problem={problem}
                 tools={toolsForProblem(problem)?.tools ?? (toolGroups.length ? [] : solutionApps)}
                 finalRecommendation={toolsForProblem(problem)?.final_recommendation}
+                onFindTools={() => void findTools(problem)}
+                isSearching={activeProblem === problemTitle(problem)}
+                progress={activeProblem === problemTitle(problem) ? toolSearchProgress : null}
+                elapsedSeconds={activeProblem === problemTitle(problem) ? researchElapsedSeconds : 0}
               />
             ))}
           </div>

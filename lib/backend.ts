@@ -290,6 +290,17 @@ export function deleteDatasetFile(datasetId: string, filename: string) {
   )
 }
 
+export function deleteDatasetFiles(datasetId: string, filenames: string[]) {
+  return request<UploadResponse>(
+    `/datasets/${encodeURIComponent(datasetId)}/files/bulk`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(filenames),
+    },
+  )
+}
+
 export function analyzeDataset(datasetId: string, alpha = 0.7) {
   return request<Report>(`/analyze/${encodeURIComponent(datasetId)}?alpha=${alpha}`, { method: "POST" })
 }
@@ -307,8 +318,10 @@ export async function streamToolRecommendations(
   alpha: number,
   onProgress: (progress: ToolSearchProgress) => void,
   signal?: AbortSignal,
+  problem?: string,
 ) {
-  const path = `/tools/stream?dataset_id=${encodeURIComponent(datasetId)}&alpha=${alpha}`
+  const problemQuery = problem ? `&problem=${encodeURIComponent(problem)}` : ""
+  const path = `/tools/stream?dataset_id=${encodeURIComponent(datasetId)}&alpha=${alpha}${problemQuery}`
   const response = await fetch(`${API_BASE_URL}${path}`, { signal })
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: string } | null
