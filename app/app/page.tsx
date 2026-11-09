@@ -8,11 +8,15 @@ import { useAppSession } from "@/components/app-session"
 import { ToolDetailsDialog } from "@/components/tool-details-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getContextReport, streamToolRecommendations, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
+import { getContextReport, streamToolRecommendations, streamUserProblemTools, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
 import { readContextFiles } from "@/lib/context-storage"
 
 function problemTitle(problem: ReportProblem | string) {
   return typeof problem === "string" ? problem : problem.label
+}
+
+function problemKey(problem: ReportProblem | string) {
+  return problemTitle(problem).trim().toLowerCase().replace(/\s+/g, " ")
 }
 
 function problemDescription(problem: ReportProblem | string) {
@@ -179,7 +183,18 @@ export default function App() {
   const [researchElapsedSeconds, setResearchElapsedSeconds] = useState(0)
   const { solutionApps, suggestedProblems, setToolSearchStatus, toolSearchProgress, setToolSearchProgress } = useAppSession()
   const problems = useMemo(
-    () => (suggestedProblems.length ? suggestedProblems : (report?.top_problems ?? [])),
+    () => {
+      if (!suggestedProblems.length) return report?.top_problems ?? []
+      const userProblem = suggestedProblems[0]
+      const seen = new Set([problemKey(userProblem)])
+      const contextProblems = (report?.top_problems ?? []).filter((problem) => {
+        const key = problemKey(problem)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      }).slice(0, 2)
+      return [userProblem, ...contextProblems]
+    },
     [report?.top_problems, suggestedProblems]
   )
 
@@ -230,18 +245,20 @@ export default function App() {
     setToolSearchStatus("running")
     setToolSearchProgress({ phase: "preparing", message: "Preparing tool research…", progress: 0 })
     try {
-      const files = await readContextFiles(user?.id ?? "local")
-      const result = await streamToolRecommendations(
-        report?.alpha ?? 0.7,
-        (progress) => {
-          if (progress.progress < maxProgress.current) return
-          maxProgress.current = progress.progress
-          setToolSearchProgress(progress)
-        },
-        controller.signal,
-        label,
-        files,
-      )
+      const onProgress = (progress: { progress: number; phase: string; message: string }) => {
+        if (progress.progress < maxProgress.current) return
+        maxProgress.current = progress.progress
+        setToolSearchProgress(progress)
+      }
+      const result = typeof problem === "string"
+        ? await streamUserProblemTools(label, onProgress, controller.signal)
+        : await streamToolRecommendations(
+            report?.alpha ?? 0.7,
+            onProgress,
+            controller.signal,
+            label,
+            await readContextFiles(user?.id ?? "local"),
+          )
       setToolGroups((current) => [
         ...current.filter((group) => group.problem !== result.recommendations[0]?.problem),
         ...result.recommendations,
@@ -289,7 +306,7 @@ export default function App() {
               <ProblemCard
                 key={`${problemTitle(problem)}-${index}`}
                 problem={problem}
-                tools={toolsForProblem(problem)?.tools ?? (toolGroups.length ? [] : solutionApps)}
+                tools={toolsForProblem(problem)?.tools ?? solutionApps}
                 finalRecommendation={toolsForProblem(problem)?.final_recommendation}
                 onFindTools={() => void findTools(problem)}
                 isSearching={activeProblem === problemTitle(problem)}

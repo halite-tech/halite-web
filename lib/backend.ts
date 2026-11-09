@@ -414,6 +414,51 @@ export async function streamToolRecommendations(
   }
   throw new Error("Tool search stream ended before recommendations were ready")
 }
+
+export async function streamUserProblemTools(
+  problem: string,
+  onProgress: (progress: ToolSearchProgress) => void,
+  signal?: AbortSignal,
+) {
+  const token = await getAuthToken()
+  const headers = new Headers({ "Content-Type": "application/json" })
+  if (token) headers.set("Authorization", `******`)
+  const response = await fetch(`${API_BASE_URL}/context/tools/problem/stream`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ problem }),
+    signal,
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: string } | null
+    throw new Error(body?.detail ?? `Backend request failed (${response.status})`)
+  }
+  if (!response.body) throw new Error("Tool search stream did not include a response body")
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  while (true) {
+    const { value, done } = await reader.read()
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+    let separator = buffer.indexOf("\n\n")
+    while (separator >= 0) {
+      const block = buffer.slice(0, separator)
+      buffer = buffer.slice(separator + 2)
+      const event = /^event: (.*)$/m.exec(block)?.[1]
+      const data = /^data: (.*)$/m.exec(block)?.[1]
+      if (event && data) {
+        const payload = JSON.parse(data)
+        if (event === "progress") onProgress(payload as ToolSearchProgress)
+        if (event === "error") throw new Error(payload.message ?? "Tool search failed")
+        if (event === "done") return payload as ToolRecommendations
+      }
+      separator = buffer.indexOf("\n\n")
+    }
+    if (done) break
+  }
+  throw new Error("Tool search stream ended before recommendations were ready")
+}
+
 export function createChatSession() {
   return request<ChatSession>("/chat/sessions", {
     method: "POST",

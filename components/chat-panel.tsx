@@ -138,9 +138,10 @@ export function ChatPanel() {
         setMessages(activeSession.messages)
         setTools(activeSession.tools)
       }
+      const sessionId = activeSession.session_id
       const userMessage: ChatMessage = { role: "user", content: message, ts: 0 }
       setMessages((current) => [...current, userMessage, { role: "assistant", content: "", ts: 0 }])
-      await streamChatMessage(activeSession.session_id, message, (event) => {
+      await streamChatMessage(sessionId, message, (event) => {
         if (event.event === "token") {
           setMessages((current) => {
             const next = [...current]
@@ -173,8 +174,9 @@ export function ChatPanel() {
             const nextState = event.data.state as Partial<ChatSession>
             setSession((current) => (current ? { ...current, ...nextState } : current))
           }
+          const finalStatus = event.data.tools.status === "error" ? "error" : "ready"
           setTools((current) => ({
-            status: "ready",
+            status: finalStatus,
             problem: null,
             result: null,
             error: null,
@@ -182,8 +184,18 @@ export function ChatPanel() {
             ...event.data.tools,
           }))
           setChatProgress(null)
+          setToolSearchProgress(null)
+          getChatSession(sessionId)
+            .then((updated) => {
+              setSession(updated)
+              setMessages(updated.messages)
+              setTools(updated.tools)
+            })
+            .catch((reason: Error) => setError(reason.message))
         } else if (event.event === "error") {
           setError(event.data.message)
+          setChatProgress(null)
+          setToolSearchProgress(null)
         }
       })
       setIsSending(false)
