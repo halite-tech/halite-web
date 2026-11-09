@@ -18,10 +18,23 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent 
 import { SiteHeader } from "@/components/site-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogDescription,
+  DialogPopup,
+  DialogPortal,
+  DialogTitle,
+  DialogViewport,
+} from "@/components/ui/dialog"
 import { deleteContextFiles as deleteStoredFiles, listContextFiles, saveContextFiles, type ContextFileMetadata } from "@/lib/context-storage"
 
 type StoredFile = ContextFileMetadata & { localName: string; domain?: string | null }
 type SortOrder = "newest" | "oldest"
+type PendingDelete =
+  | { type: "file"; file: StoredFile }
+  | { type: "selected"; filenames: string[] }
 
 function iconForFile(name: string) {
   const extension = name.split(".").pop()?.toLowerCase()
@@ -89,6 +102,7 @@ export default function ContextPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>("newest")
   const [isUploading, setIsUploading] = useState(false)
   const [deletingFile, setDeletingFile] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
   const [isDragActive, setIsDragActive] = useState(false)
   const [status, setStatus] = useState<string | null>("Loading your business context…")
@@ -178,7 +192,7 @@ export default function ContextPage() {
   }
 
   async function handleDeleteFile(file: StoredFile) {
-    if (deletingFile || !window.confirm(`Delete ${file.localName}?`)) return
+    if (deletingFile) return
     const previousFiles = files
     setFiles((current) => current.filter((candidate) => candidate.localName !== file.localName))
     setDeletingFile(file.localName)
@@ -204,7 +218,6 @@ export default function ContextPage() {
   async function handleDeleteSelected() {
     if (deletingFile || selectedFiles.size === 0) return
     const filenames = Array.from(selectedFiles)
-    if (!window.confirm(`Delete ${filenames.length} selected file${filenames.length === 1 ? "" : "s"}?`)) return
     const previousFiles = files
     setFiles((current) => current.filter((file) => !selectedFiles.has(file.localName)))
     setDeletingFile("selected")
@@ -296,7 +309,7 @@ export default function ContextPage() {
                     size="default"
                     className="h-10"
                     disabled={!selectedFiles.size || Boolean(deletingFile)}
-                    onClick={() => void handleDeleteSelected()}
+                    onClick={() => setPendingDelete({ type: "selected", filenames: Array.from(selectedFiles) })}
                   >
                     <Trash size={15} />
                     Delete{selectedFiles.size ? ` (${selectedFiles.size})` : ""}
@@ -334,7 +347,7 @@ export default function ContextPage() {
                       variant="ghost"
                       size="icon"
                       className="text-muted-foreground hover:text-destructive"
-                      onClick={() => void handleDeleteFile(file)}
+                      onClick={() => setPendingDelete({ type: "file", file })}
                       disabled={Boolean(deletingFile)}
                       aria-label={`Delete ${file.localName}`}
                     >
@@ -346,6 +359,37 @@ export default function ContextPage() {
             )}
           </CardContent>
         </Card>
+        <Dialog open={pendingDelete !== null} onOpenChange={(open) => { if (!open) setPendingDelete(null) }}>
+          <DialogPortal>
+            <DialogBackdrop />
+            <DialogViewport>
+              <DialogPopup className="max-w-md">
+                <DialogTitle>Delete {pendingDelete?.type === "file" ? "file" : "selected files"}?</DialogTitle>
+                <DialogDescription className="mt-2">
+                  {pendingDelete?.type === "file"
+                    ? `This will permanently remove ${pendingDelete.file.localName} from your business context.`
+                    : `This will permanently remove ${pendingDelete?.filenames.length ?? 0} selected files from your business context.`}
+                </DialogDescription>
+                <div className="mt-6 flex justify-end gap-2">
+                  <DialogClose render={<Button variant="outline">Cancel</Button>} />
+                  <Button
+                    variant="destructive"
+                    disabled={Boolean(deletingFile)}
+                    onClick={() => {
+                      const request = pendingDelete
+                      setPendingDelete(null)
+                      if (request?.type === "file") void handleDeleteFile(request.file)
+                      if (request?.type === "selected") void handleDeleteSelected()
+                    }}
+                  >
+                    <Trash size={15} />
+                    Delete
+                  </Button>
+                </div>
+              </DialogPopup>
+            </DialogViewport>
+          </DialogPortal>
+        </Dialog>
         <p className="mt-4 text-xs text-muted-foreground">Your business context stays in this browser until you remove it.</p>
       </div>
     </main>

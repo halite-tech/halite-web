@@ -10,6 +10,7 @@ type StoredContextFile = ContextFileMetadata & { userId: string; blob: Blob }
 const DATABASE_NAME = "halite-context"
 const STORE_NAME = "files"
 const METADATA_PREFIX = "halite-context-metadata:"
+export const CONTEXT_CHANGED_EVENT = "halite-context-changed"
 
 function metadataKey(userId: string) {
   return `${METADATA_PREFIX}${userId}`
@@ -65,6 +66,7 @@ export async function saveContextFiles(userId: string, files: File[]) {
     { name: file.name, type: file.type, size: file.size, lastModified: Date.now() },
   ]))
   writeMetadata(userId, [...existing.filter((file) => !replacements.has(file.name)), ...replacements.values()])
+  window.dispatchEvent(new Event(CONTEXT_CHANGED_EVENT))
   database.close()
 }
 
@@ -79,6 +81,7 @@ export async function deleteContextFiles(userId: string, names: string[]) {
   })
   const deleted = new Set(names)
   writeMetadata(userId, readMetadata(userId).filter((file) => !deleted.has(file.name)))
+  window.dispatchEvent(new Event(CONTEXT_CHANGED_EVENT))
   database.close()
 }
 

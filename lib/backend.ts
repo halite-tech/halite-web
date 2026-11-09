@@ -71,6 +71,23 @@ export type Report = {
   sensitivity?: Record<string, unknown>
 }
 
+export type Industry = {
+  id: string
+  label: string
+}
+
+export const INDUSTRIES: Industry[] = [
+  { id: "restaurant", label: "Restaurant" },
+  { id: "coffee_shop", label: "Coffee shop" },
+  { id: "retail", label: "Retail" },
+  { id: "healthcare", label: "Healthcare" },
+  { id: "hospitality", label: "Hospitality" },
+  { id: "hvac", label: "HVAC services" },
+  { id: "landscaping", label: "Landscaping" },
+  { id: "professional_services", label: "Professional services" },
+  { id: "manufacturing", label: "Manufacturing" },
+]
+
 export type SolutionType = {
   id: string
   label: string
@@ -336,14 +353,15 @@ export function deleteContextFiles(filenames: string[]) {
   })
 }
 
-export function analyzeContext(alpha = 0.7) {
-  return request<Report>(`/context/analyze?alpha=${alpha}`, { method: "POST" })
+export function analyzeContext(alpha = 0.7, industry = "restaurant") {
+  return request<Report>(`/context/analyze?alpha=${alpha}&industry=${encodeURIComponent(industry)}`, { method: "POST" })
 }
 
-export function getContextReport(files: File[], alpha = 0.7) {
+export function getContextReport(files: File[], alpha = 0.7, industry = "restaurant") {
   const body = new FormData()
   files.forEach((file) => body.append("files", file))
   body.append("alpha", String(alpha))
+  body.append("industry", industry)
   return request<Report>("/context/report", { method: "POST", body })
 }
 
@@ -466,11 +484,11 @@ export async function streamUserProblemTools(
   throw new Error("Tool search stream ended before recommendations were ready")
 }
 
-export function createChatSession() {
+export function createChatSession(industry = "restaurant") {
   return request<ChatSession>("/chat/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ industry }),
   })
 }
 

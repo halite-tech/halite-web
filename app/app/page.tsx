@@ -18,8 +18,9 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getContextReport, plainText, streamToolRecommendations, streamUserProblemTools, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
-import { readContextFiles } from "@/lib/context-storage"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { getContextReport, INDUSTRIES, plainText, streamToolRecommendations, streamUserProblemTools, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
+import { CONTEXT_CHANGED_EVENT, readContextFiles } from "@/lib/context-storage"
 
 function problemTitle(problem: ReportProblem | string) {
   return plainText(typeof problem === "string" ? problem : problem.label)
@@ -375,6 +376,12 @@ export default function App() {
   const { isLoaded, isSignedIn } = useAuth()
   const { user } = useUser()
   const [report, setReport] = useState<Report | null>(null)
+  const [analysisLoading, setAnalysisLoading] = useState(true)
+  const [contextRevision, setContextRevision] = useState(0)
+  const [industry, setIndustry] = useState(() => {
+    if (typeof window === "undefined") return "restaurant"
+    return window.localStorage.getItem("halite.industry") ?? "restaurant"
+  })
   const [toolGroups, setToolGroups] = useState<ToolRecommendationGroup[]>([])
   const [toolsLoading, setToolsLoading] = useState(false)
   const [toolsError, setToolsError] = useState<string | null>(null)
@@ -416,30 +423,58 @@ export default function App() {
   }, [activeProblem])
 
   useEffect(() => {
+    function handleContextChanged() {
+      setAnalysisLoading(true)
+      setReport(null)
+      setToolGroups([])
+      setToolsError(null)
+      setContextRevision((revision) => revision + 1)
+    }
+
+    window.addEventListener(CONTEXT_CHANGED_EVENT, handleContextChanged)
+    return () => window.removeEventListener(CONTEXT_CHANGED_EVENT, handleContextChanged)
+  }, [])
+
+  useEffect(() => {
     if (!isLoaded || !isSignedIn) return
+    let active = true
     if (window.location.search) window.history.replaceState(null, "", window.location.pathname)
     readContextFiles(user?.id ?? "local")
       .then((files) => {
         if (!files.length) throw new Error("no files uploaded")
-        return getContextReport(files)
+        return getContextReport(files, 0.7, industry)
       })
       .then((nextReport) => {
-        setReport(nextReport)
+        if (active) setReport(nextReport)
       })
       .catch((reason: Error) => {
+        if (!active) return
         if (reason.name !== "AbortError") {
           if (reason.message.includes("no files uploaded")) {
             setReport(null)
-            setToolGroups([])
-            setToolsError(null)
             setToolSearchProgress(null)
             return
           }
           setToolsError(reason.message)
         }
       })
-    return () => toolSearchController.current?.abort()
-  }, [isLoaded, isSignedIn, setToolSearchProgress, user?.id])
+      .finally(() => {
+        if (active) setAnalysisLoading(false)
+      })
+    return () => {
+      active = false
+      toolSearchController.current?.abort()
+    }
+  }, [contextRevision, industry, isLoaded, isSignedIn, setToolSearchProgress, user?.id])
+
+  function changeIndustry(nextIndustry: string) {
+    setIndustry(nextIndustry)
+    window.localStorage.setItem("halite.industry", nextIndustry)
+    setAnalysisLoading(true)
+    setReport(null)
+    setToolGroups([])
+    setToolsError(null)
+  }
 
   async function findTools(problem: ReportProblem | string) {
     if (toolSearchController.current) return
@@ -526,9 +561,36 @@ export default function App() {
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
             Explore tools picked for the problems small businesses face every day. Ask Halite on the right where to start.
           </p>
+          <label className="mt-5 flex max-w-xs flex-col gap-2 text-xs font-medium text-muted-foreground">
+            Industry
+            <Select
+              value={industry}
+              disabled={analysisLoading}
+              onValueChange={(value: string | null) => {
+                if (value) changeIndustry(value)
+              }}
+            >
+              <SelectTrigger aria-label="Industry">
+                <SelectValue>
+                  {INDUSTRIES.find((option) => option.id === industry)?.label ?? "Select an industry"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {INDUSTRIES.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
         </div>
 
-        {problems.length > 0 ? (
+        {analysisLoading ? (
+          <div className="flex min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-background/20 px-5 py-10 text-center">
+            <CircleNotch className="animate-spin text-primary" size={24} />
+            <p className="mt-4 text-sm font-medium">Loading new problems…</p>
+            <p className="mt-2 text-xs text-muted-foreground">Analyzing your business for this industry.</p>
+          </div>
+        ) : problems.length > 0 ? (
           <div className="space-y-5">
             {problems.map((problem, index) => (
               <ProblemCard

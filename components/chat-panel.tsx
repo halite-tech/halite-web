@@ -2,7 +2,7 @@
 
 import { Sparkle } from "@phosphor-icons/react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useAuth } from "@clerk/nextjs"
+import { useAuth, useUser } from "@clerk/nextjs"
 import {
   createChatSession,
   getToolRecommendations,
@@ -15,6 +15,7 @@ import {
   type ToolsState,
 } from "@/lib/backend"
 import { ChatComposer } from "@/components/chat-composer"
+import { saveContextFiles } from "@/lib/context-storage"
 import { Button } from "@/components/ui/button"
 import { useAppSession } from "@/components/app-session"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
@@ -70,6 +71,7 @@ function AssistantLoading({ title = "Thinking", progress, message }: { title?: s
 
 export function ChatPanel() {
   const { isLoaded: isAuthLoaded } = useAuth()
+  const { user } = useUser()
   const { setSolutionApps, setSuggestedProblems, toolSearchProgress, setToolSearchProgress } = useAppSession()
   const [session, setSession] = useState<ChatSession | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -99,7 +101,8 @@ export function ChatPanel() {
     if (!isAuthLoaded) return
     if (sessionInitializationRef.current) return
     sessionInitializationRef.current = true
-    createChatSession()
+    const industry = window.localStorage.getItem("halite.industry") ?? "restaurant"
+    createChatSession(industry)
       .then((created) => {
         setSession(created)
         setMessages(created.messages)
@@ -134,11 +137,12 @@ export function ChatPanel() {
     let activeSession = session
     try {
       if (!activeSession) {
-        activeSession = await createChatSession()
+        activeSession = await createChatSession(window.localStorage.getItem("halite.industry") ?? "restaurant")
         setSession(activeSession)
         setMessages(activeSession.messages)
         setTools(activeSession.tools)
       }
+
       const sessionId = activeSession.session_id
       const userMessage: ChatMessage = { role: "user", content: message, ts: 0 }
       setMessages((current) => [...current, userMessage, { role: "assistant", content: "", ts: 0 }])
@@ -206,6 +210,11 @@ export function ChatPanel() {
     }
   }
 
+  async function saveAttachedFiles(files: File[]) {
+    await saveContextFiles(user?.id ?? "local", files)
+    setError(null)
+  }
+
   return (
     <aside className="flex min-h-0 flex-col overflow-hidden border-t border-border/70 bg-card/30 lg:border-t-0">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-6">
@@ -263,7 +272,11 @@ export function ChatPanel() {
         {tools?.status === "error" && <p className="text-xs text-destructive">{tools.error ?? "Tool research failed. Try sending another message."}</p>}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
-      <ChatComposer disabled={isSending || isSearchingTools} onSend={sendMessage} />
+      <ChatComposer
+        disabled={isSending || isSearchingTools}
+        onSend={sendMessage}
+        onAttachFiles={saveAttachedFiles}
+      />
     </aside>
   )
 }
