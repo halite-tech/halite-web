@@ -5,7 +5,6 @@ import { useUser } from "@clerk/nextjs"
 import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAppSession } from "@/components/app-session"
-import { ToolDetailsDialog } from "@/components/tool-details-dialog"
 import {
   Dialog,
   DialogBackdrop,
@@ -82,10 +81,12 @@ function ToolRow({
   tool,
   selected,
   onToggle,
+  onOpenAdopt,
 }: {
   tool: ToolRecommendation
   selected?: boolean
   onToggle?: () => void
+  onOpenAdopt?: () => void
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -94,25 +95,27 @@ function ToolRow({
           type="button"
           aria-label={`${selected ? "Remove" : "Add"} ${tool.tool_name} from comparison`}
           aria-pressed={selected}
-          onClick={onToggle}
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggle()
+          }}
           className={`flex size-8 shrink-0 items-center justify-center rounded-lg border transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border/70 text-muted-foreground hover:border-primary/50"}`}
         >
           {selected ? <Check size={15} weight="bold" /> : <span className="text-lg leading-none">+</span>}
         </button>
       )}
-      <ToolDetailsDialog
-        tool={{
-          name: tool.tool_name,
-          category: tool.category ?? "AI tool",
-          summary: plainText(tool.tool_description ?? tool.tool_tagline ?? "Explore this tool to learn how it can help your business."),
-          description: plainText(tool.tool_description ?? ""),
-          website: tool.tool_home_page,
-          pricing: tool.tool_pricing || tool.tool_home_page,
-          stats: [],
-          solutionTypes: tool.solution_types,
+      <div
+        role={onOpenAdopt ? "button" : undefined}
+        tabIndex={onOpenAdopt ? 0 : undefined}
+        onClick={onOpenAdopt}
+        onKeyDown={(event) => {
+          if (onOpenAdopt && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault()
+            onOpenAdopt()
+          }
         }}
+        className={`flex min-w-0 flex-1 items-center gap-4 rounded-lg border border-border/70 bg-background/30 p-3 transition-colors ${onOpenAdopt ? "cursor-pointer hover:border-primary/30 hover:bg-muted/40" : ""}`}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-4 rounded-lg border border-border/70 bg-background/30 p-3 transition-colors hover:border-primary/30 hover:bg-muted/40">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background p-2.5">
           <ToolLogo tool={tool} />
         </div>
@@ -130,8 +133,7 @@ function ToolRow({
         <span className="shrink-0 rounded-lg p-2 text-muted-foreground transition-colors group-hover:text-foreground">
           <ArrowUpRight size={17} />
         </span>
-        </div>
-      </ToolDetailsDialog>
+      </div>
     </div>
   )
 }
@@ -169,9 +171,21 @@ function CompareDialog({
               <div className="grid min-w-[640px] gap-3" style={{ gridTemplateColumns: `140px repeat(${tools.length}, minmax(150px, 1fr))` }}>
                 <div />
                 {tools.map((tool) => (
-                  <div key={tool.tool_name} className="rounded-xl border border-border/70 bg-background/40 p-3">
-                    <div className="flex items-center gap-2"><ToolLogo tool={tool} /><span className="text-sm font-medium">{tool.tool_name}</span></div>
-                    <button type="button" onClick={() => onAdopt(tool)} className="mt-3 text-xs font-medium text-primary hover:underline">Build adoption plan</button>
+                  <div
+                    key={tool.tool_name}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onAdopt(tool)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        onAdopt(tool)
+                      }
+                    }}
+                    className="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-border/70 bg-background/40 p-3 transition-colors hover:border-primary/40 hover:bg-muted/40"
+                  >
+                    <div className="flex min-w-0 items-center gap-2"><ToolLogo tool={tool} /><span className="truncate text-sm font-medium">{tool.tool_name}</span></div>
+                    <ArrowUpRight className="shrink-0 text-muted-foreground" size={16} />
                   </div>
                 ))}
                 {[
@@ -180,17 +194,13 @@ function CompareDialog({
                   ["Fit type", (tool: ToolRecommendation) => tool.category === "platform_integrated" ? "Fits your POS stack" : "Highest ROI standalone"],
                   ["What it does", (tool: ToolRecommendation) => tool.solution_types?.map((type) => type.label).join(", ") || "Restaurant operations"],
                   ["Details", (tool: ToolRecommendation) => plainText(tool.tool_description ?? "Not publicly available")],
-                ].map(([label, value]) => (
+                ].map(([label, value], rowIndex, rows) => (
                   <div key={String(label)} className="contents">
-                    <div className="flex items-center border-b border-border/60 py-3 text-xs font-medium text-muted-foreground">{String(label)}</div>
-                    {tools.map((tool) => <div key={`${String(label)}-${tool.tool_name}`} className="border-b border-border/60 py-3 text-xs leading-5">{(value as (tool: ToolRecommendation) => string)(tool)}</div>)}
+                    <div className={`flex items-center ${rowIndex < rows.length - 1 ? "border-b border-border/60" : ""} py-3 text-xs font-medium text-muted-foreground`}>{String(label)}</div>
+                    {tools.map((tool) => <div key={`${String(label)}-${tool.tool_name}`} className={`${rowIndex < rows.length - 1 ? "border-b border-border/60" : ""} py-3 text-xs leading-5`}>{(value as (tool: ToolRecommendation) => string)(tool)}</div>)}
                   </div>
                 ))}
               </div>
-            </div>
-            <div className="mt-6 flex items-center justify-between rounded-xl border border-primary/20 bg-primary/[0.05] p-4">
-              <p className="text-xs text-muted-foreground">Ready to choose? Build a practical plan for one of these tools.</p>
-              <span className="text-xs font-medium text-primary">Choose “Build adoption plan” above</span>
             </div>
           </DialogPopup>
         </DialogViewport>
@@ -268,6 +278,7 @@ function ProblemCard({
   elapsedSeconds = 0,
   selectedTools,
   onToggleCompare,
+  onOpenAdopt,
   onSelectAll,
   onCompare,
 }: {
@@ -280,6 +291,7 @@ function ProblemCard({
   elapsedSeconds?: number
   selectedTools?: ToolRecommendation[]
   onToggleCompare?: (tool: ToolRecommendation) => void
+  onOpenAdopt?: (tool: ToolRecommendation) => void
   onSelectAll?: () => void
   onCompare?: () => void
 }) {
@@ -320,7 +332,7 @@ function ProblemCard({
                 )}
               </div>
             </div>
-            {tools.map((tool, index) => <ToolRow key={`${tool.tool_name}-${index}`} tool={tool} selected={selectedTools?.some((selected) => selected.tool_name === tool.tool_name)} onToggle={onToggleCompare ? () => onToggleCompare(tool) : undefined} />)}
+            {tools.map((tool, index) => <ToolRow key={`${tool.tool_name}-${index}`} tool={tool} selected={selectedTools?.some((selected) => selected.tool_name === tool.tool_name)} onToggle={onToggleCompare ? () => onToggleCompare(tool) : undefined} onOpenAdopt={onOpenAdopt ? () => onOpenAdopt(tool) : undefined} />)}
           </>
         ) : onFindTools ? (
           <Button
@@ -516,6 +528,11 @@ export default function App() {
                 finalRecommendation={toolsForProblem(problem)?.final_recommendation}
                 selectedTools={compareSelection[problemKey(problem)]}
                 onToggleCompare={(tool) => toggleCompare(problem, tool)}
+                onOpenAdopt={(tool) => setAdoptionProblem({
+                  title: problemTitle(problem),
+                  tool,
+                  recommendation: toolsForProblem(problem)?.final_recommendation,
+                })}
                 onSelectAll={() => selectAllForCompare(problem, toolsForProblem(problem)?.tools ?? solutionApps)}
                 onCompare={() => setCompareProblem({
                   title: problemTitle(problem),
