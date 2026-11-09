@@ -147,6 +147,13 @@ export type ChatEvent =
   | { event: "done"; data: { state: unknown; tools: Partial<ToolsState> } }
   | { event: "error"; data: { message: string } }
 
+export function plainText(value: string) {
+  return value
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "")
+    .replace(/^\s*[-*]\s+/gm, "")
+}
+
 function normalizeTool(value: unknown): ToolRecommendation | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const tool = value as Record<string, unknown>
@@ -156,28 +163,28 @@ function normalizeTool(value: unknown): ToolRecommendation | null {
   const homepage = tool.tool_home_page ?? tool.toolHomePage ?? tool.home_page ?? tool.homePage ?? tool.url
   return {
     tool_number: typeof tool.tool_number === "number" ? tool.tool_number : undefined,
-    tool_name: name.trim(),
+    tool_name: plainText(name.trim()),
     tool_tagline: typeof tool.tool_tagline === "string"
-      ? tool.tool_tagline
+      ? plainText(tool.tool_tagline)
       : typeof tool.toolTagline === "string"
-        ? tool.toolTagline
+        ? plainText(tool.toolTagline)
         : typeof tool.tagline === "string"
-          ? tool.tagline
+          ? plainText(tool.tagline)
           : undefined,
     category: typeof tool.category === "string" ? tool.category : undefined,
     tool_description: typeof tool.tool_description === "string"
-      ? tool.tool_description
+      ? plainText(tool.tool_description)
       : typeof tool.toolDescription === "string"
-        ? tool.toolDescription
+        ? plainText(tool.toolDescription)
         : typeof tool.description === "string"
-          ? tool.description
+          ? plainText(tool.description)
           : undefined,
     tool_pricing: typeof tool.tool_pricing === "string"
-      ? tool.tool_pricing
+      ? plainText(tool.tool_pricing)
       : typeof tool.toolPricing === "string"
-        ? tool.toolPricing
+        ? plainText(tool.toolPricing)
         : typeof tool.pricing === "string"
-          ? tool.pricing
+          ? plainText(tool.pricing)
           : undefined,
     tool_home_page: typeof homepage === "string" && homepage.trim() ? homepage : "#",
     tool_logo_url: typeof tool.tool_logo_url === "string" ? tool.tool_logo_url : undefined,
@@ -236,7 +243,7 @@ export function getToolRecommendationGroups(result: unknown): ToolRecommendation
     return problem || tools.length
       ? [{
           problem,
-          final_recommendation: typeof group.final_recommendation === "string" ? group.final_recommendation : undefined,
+          final_recommendation: typeof group.final_recommendation === "string" ? plainText(group.final_recommendation) : undefined,
           tools,
         }]
       : []

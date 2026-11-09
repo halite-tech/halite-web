@@ -7,6 +7,7 @@ import {
   createChatSession,
   getToolRecommendations,
   getChatSession,
+  plainText,
   streamChatMessage,
   type ChatMessage,
   type ChatSession,
@@ -233,7 +234,7 @@ export function ChatPanel() {
         {messages.map((message, index) =>
           message.role === "assistant" && !message.content && isSending ? null : message.role === "event" ? (
             <div key={`${message.ts}-${index}`} className="border-y border-border/60 py-2 text-center text-xs text-muted-foreground">
-              {message.type === "problem_changed" ? `Switched focus to ${message.problem}` : message.content}
+              {plainText(message.type === "problem_changed" ? `Switched focus to ${message.problem ?? ""}` : message.content)}
             </div>
           ) : (
             <Message key={`${message.ts}-${index}`} align={message.role === "user" ? "end" : "start"}>
@@ -244,7 +245,7 @@ export function ChatPanel() {
               )}
               <MessageContent>
                 <Bubble align={message.role === "user" ? "end" : "start"}>
-                  <BubbleContent>{message.content}</BubbleContent>
+                  <BubbleContent>{plainText(message.content)}</BubbleContent>
                 </Bubble>
               </MessageContent>
             </Message>

@@ -1,18 +1,28 @@
 "use client"
 
-import { ArrowUpRight, CircleNotch, Globe } from "@phosphor-icons/react"
+import { ArrowUpRight, Check, CircleNotch, Copy, Globe, X } from "@phosphor-icons/react"
 import { useUser } from "@clerk/nextjs"
 import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAppSession } from "@/components/app-session"
 import { ToolDetailsDialog } from "@/components/tool-details-dialog"
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogDescription,
+  DialogPopup,
+  DialogPortal,
+  DialogTitle,
+  DialogViewport,
+} from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getContextReport, streamToolRecommendations, streamUserProblemTools, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
+import { getContextReport, plainText, streamToolRecommendations, streamUserProblemTools, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
 import { readContextFiles } from "@/lib/context-storage"
 
 function problemTitle(problem: ReportProblem | string) {
-  return typeof problem === "string" ? problem : problem.label
+  return plainText(typeof problem === "string" ? problem : problem.label)
 }
 
 function problemKey(problem: ReportProblem | string) {
@@ -21,7 +31,7 @@ function problemKey(problem: ReportProblem | string) {
 
 function problemDescription(problem: ReportProblem | string) {
   if (typeof problem === "string") return "Tell Halite more about this problem to find the right tools."
-  return problem.description ?? problem.summary ?? "Tell Halite more about this problem to find the right tools."
+  return plainText(problem.description ?? problem.summary ?? "Tell Halite more about this problem to find the right tools.")
 }
 
 function toolLogoCandidates(tool: ToolRecommendation) {
@@ -68,21 +78,41 @@ function ToolLogo({ tool }: { tool: ToolRecommendation }) {
   )
 }
 
-function ToolRow({ tool }: { tool: ToolRecommendation }) {
+function ToolRow({
+  tool,
+  selected,
+  onToggle,
+}: {
+  tool: ToolRecommendation
+  selected?: boolean
+  onToggle?: () => void
+}) {
   return (
-    <ToolDetailsDialog
-      tool={{
-        name: tool.tool_name,
-        category: tool.category ?? "AI tool",
-        summary: tool.tool_description ?? tool.tool_tagline ?? "Explore this tool to learn how it can help your business.",
-        description: tool.tool_description ?? "",
-        website: tool.tool_home_page,
-        pricing: tool.tool_pricing || tool.tool_home_page,
-        stats: [],
-        solutionTypes: tool.solution_types,
-      }}
-    >
-      <div className="flex items-center gap-4 rounded-lg border border-border/70 bg-background/30 p-3 transition-colors hover:border-primary/30 hover:bg-muted/40">
+    <div className="flex items-center gap-2">
+      {onToggle && (
+        <button
+          type="button"
+          aria-label={`${selected ? "Remove" : "Add"} ${tool.tool_name} from comparison`}
+          aria-pressed={selected}
+          onClick={onToggle}
+          className={`flex size-8 shrink-0 items-center justify-center rounded-lg border transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border/70 text-muted-foreground hover:border-primary/50"}`}
+        >
+          {selected ? <Check size={15} weight="bold" /> : <span className="text-lg leading-none">+</span>}
+        </button>
+      )}
+      <ToolDetailsDialog
+        tool={{
+          name: tool.tool_name,
+          category: tool.category ?? "AI tool",
+          summary: plainText(tool.tool_description ?? tool.tool_tagline ?? "Explore this tool to learn how it can help your business."),
+          description: plainText(tool.tool_description ?? ""),
+          website: tool.tool_home_page,
+          pricing: tool.tool_pricing || tool.tool_home_page,
+          stats: [],
+          solutionTypes: tool.solution_types,
+        }}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-4 rounded-lg border border-border/70 bg-background/30 p-3 transition-colors hover:border-primary/30 hover:bg-muted/40">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background p-2.5">
           <ToolLogo tool={tool} />
         </div>
@@ -95,13 +125,136 @@ function ToolRow({ tool }: { tool: ToolRecommendation }) {
                 </span>
               ))}
             </div>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{tool.tool_tagline ?? "Explore this tool for your business."}</p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{plainText(tool.tool_tagline ?? "Explore this tool for your business.")}</p>
         </div>
         <span className="shrink-0 rounded-lg p-2 text-muted-foreground transition-colors group-hover:text-foreground">
           <ArrowUpRight size={17} />
         </span>
-      </div>
-    </ToolDetailsDialog>
+        </div>
+      </ToolDetailsDialog>
+    </div>
+  )
+}
+
+function CompareDialog({
+  problem,
+  tools,
+  open,
+  onOpenChange,
+  onAdopt,
+}: {
+  problem: string
+  tools: ToolRecommendation[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onAdopt: (tool: ToolRecommendation) => void
+}) {
+  if (!open) return null
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPortal>
+        <DialogBackdrop />
+        <DialogViewport className="overflow-y-auto">
+          <DialogPopup className="my-4 max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] overflow-y-auto p-4 sm:my-6 sm:max-h-[calc(100dvh-3rem)] sm:max-w-[calc(100vw-3rem)] sm:p-6 lg:max-w-5xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="mb-1 text-xs font-medium tracking-wide text-primary uppercase">Compare tools</p>
+                <DialogTitle>{problem}</DialogTitle>
+                <DialogDescription className="mt-2">Compare options for this problem, then open an adoption plan for your choice.</DialogDescription>
+              </div>
+              <DialogClose aria-label="Close"><X size={18} /></DialogClose>
+            </div>
+            <div className="mt-6 overflow-x-auto">
+              <div className="grid min-w-[640px] gap-3" style={{ gridTemplateColumns: `140px repeat(${tools.length}, minmax(150px, 1fr))` }}>
+                <div />
+                {tools.map((tool) => (
+                  <div key={tool.tool_name} className="rounded-xl border border-border/70 bg-background/40 p-3">
+                    <div className="flex items-center gap-2"><ToolLogo tool={tool} /><span className="text-sm font-medium">{tool.tool_name}</span></div>
+                    <button type="button" onClick={() => onAdopt(tool)} className="mt-3 text-xs font-medium text-primary hover:underline">Build adoption plan</button>
+                  </div>
+                ))}
+                {[
+                  ["One-liner", (tool: ToolRecommendation) => plainText(tool.tool_tagline ?? "Not publicly available")],
+                  ["Pricing", (tool: ToolRecommendation) => plainText(tool.tool_pricing ?? "Not publicly available")],
+                  ["Fit type", (tool: ToolRecommendation) => tool.category === "platform_integrated" ? "Fits your POS stack" : "Highest ROI standalone"],
+                  ["What it does", (tool: ToolRecommendation) => tool.solution_types?.map((type) => type.label).join(", ") || "Restaurant operations"],
+                  ["Details", (tool: ToolRecommendation) => plainText(tool.tool_description ?? "Not publicly available")],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="contents">
+                    <div className="flex items-center border-b border-border/60 py-3 text-xs font-medium text-muted-foreground">{String(label)}</div>
+                    {tools.map((tool) => <div key={`${String(label)}-${tool.tool_name}`} className="border-b border-border/60 py-3 text-xs leading-5">{(value as (tool: ToolRecommendation) => string)(tool)}</div>)}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="mt-6 flex items-center justify-between rounded-xl border border-primary/20 bg-primary/[0.05] p-4">
+              <p className="text-xs text-muted-foreground">Ready to choose? Build a practical plan for one of these tools.</p>
+              <span className="text-xs font-medium text-primary">Choose “Build adoption plan” above</span>
+            </div>
+          </DialogPopup>
+        </DialogViewport>
+      </DialogPortal>
+    </Dialog>
+  )
+}
+
+function AdoptionDialog({
+  problem,
+  tool,
+  recommendation,
+  open,
+  onOpenChange,
+}: {
+  problem: string
+  tool: ToolRecommendation
+  recommendation?: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const plan = `Problem: ${problem}\nChosen tool: ${tool.tool_name}\nNext steps:\n1. Book a demo or review pricing: ${tool.tool_home_page}\n2. Confirm the fit against your current process and constraints.\n3. Prepare the data this tool needs, then set a measurable success target.`
+  async function copyPlan() {
+    await navigator.clipboard.writeText(plan)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPortal>
+        <DialogBackdrop />
+        <DialogViewport className="overflow-y-auto">
+          <DialogPopup className="my-4 max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] overflow-y-auto sm:my-6 sm:max-h-[calc(100dvh-3rem)] sm:max-w-lg">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="mb-1 text-xs font-medium tracking-wide text-primary uppercase">Adoption plan</p>
+                <DialogTitle>Start with {tool.tool_name}</DialogTitle>
+                <DialogDescription className="mt-2">{problem}</DialogDescription>
+              </div>
+              <DialogClose aria-label="Close"><X size={18} /></DialogClose>
+            </div>
+            {recommendation && <p className="mt-5 rounded-xl border border-primary/20 bg-primary/[0.05] p-4 text-sm leading-6 text-muted-foreground">{recommendation}</p>}
+            <div className="mt-5 space-y-3">
+              <p className="text-xs font-medium tracking-wide text-primary uppercase">Your Monday morning plan</p>
+              {[
+                ["This week", "Book a demo or review pricing and integrations."],
+                ["Before you buy", "Confirm the workflow fits your staff, budget, and current systems."],
+                ["Data to connect", "Prepare the export or process data this tool needs and define one success metric."],
+              ].map(([label, detail], index) => (
+                <div key={label} className="flex gap-3 rounded-xl border border-border/70 bg-background/40 p-3">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">{index + 1}</span>
+                  <div><p className="text-sm font-medium">{label}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</p></div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <a href={tool.tool_home_page} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground">View pricing / start trial <ArrowUpRight size={14} /></a>
+              <button type="button" onClick={() => void copyPlan()} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium"><Copy size={14} />{copied ? "Copied plan" : "Copy plan"}</button>
+            </div>
+          </DialogPopup>
+        </DialogViewport>
+      </DialogPortal>
+    </Dialog>
   )
 }
 
@@ -113,6 +266,10 @@ function ProblemCard({
   isSearching,
   progress,
   elapsedSeconds = 0,
+  selectedTools,
+  onToggleCompare,
+  onSelectAll,
+  onCompare,
 }: {
   problem: ReportProblem | string
   tools: ToolRecommendation[]
@@ -121,6 +278,10 @@ function ProblemCard({
   isSearching?: boolean
   progress?: { message: string; progress: number } | null
   elapsedSeconds?: number
+  selectedTools?: ToolRecommendation[]
+  onToggleCompare?: (tool: ToolRecommendation) => void
+  onSelectAll?: () => void
+  onCompare?: () => void
 }) {
   return (
     <Card className="gap-0 overflow-hidden border-border/70 border-l-2 border-l-primary/40 bg-card/60 py-0">
@@ -133,10 +294,35 @@ function ProblemCard({
       <CardContent className="space-y-2.5 px-4 py-4 sm:px-5">
         {finalRecommendation && (
           <div className="rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-xs leading-5 text-muted-foreground">
-            <span className="font-medium text-foreground">Recommended starting point: </span>{finalRecommendation}
+            <span className="font-medium text-foreground">Recommended starting point: </span>{plainText(finalRecommendation)}
           </div>
         )}
-        {tools.length > 0 ? tools.map((tool, index) => <ToolRow key={`${tool.tool_name}-${index}`} tool={tool} />) : onFindTools ? (
+        {tools.length > 0 ? (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-background/40 px-3 py-2.5">
+              <p className="text-xs text-muted-foreground">Select 2–4 tools to compare.</p>
+              <div className="flex items-center gap-2">
+                {onSelectAll && (
+                  <Button size="sm" variant="ghost" onClick={onSelectAll} className="h-8 text-xs text-muted-foreground hover:text-foreground">
+                    {(selectedTools?.length ?? 0) >= Math.min(4, tools.length) ? "Clear selection" : "Select all"}
+                  </Button>
+                )}
+                {onCompare && (
+                  <Button
+                    size="sm"
+                    disabled={(selectedTools?.length ?? 0) < 2}
+                    onClick={onCompare}
+                    className="h-9 rounded-lg bg-primary px-4 text-xs font-semibold shadow-sm shadow-primary/20 transition-all hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-md hover:shadow-primary/25 disabled:translate-y-0 disabled:opacity-50"
+                  >
+                    Compare{(selectedTools?.length ?? 0) > 0 ? ` (${selectedTools?.length})` : ""}
+                    <ArrowUpRight size={14} />
+                  </Button>
+                )}
+              </div>
+            </div>
+            {tools.map((tool, index) => <ToolRow key={`${tool.tool_name}-${index}`} tool={tool} selected={selectedTools?.some((selected) => selected.tool_name === tool.tool_name)} onToggle={onToggleCompare ? () => onToggleCompare(tool) : undefined} />)}
+          </>
+        ) : onFindTools ? (
           <Button
             variant="outline"
             disabled={isSearching}
@@ -181,6 +367,9 @@ export default function App() {
   const maxProgress = useRef(0)
   const [activeProblem, setActiveProblem] = useState<string | null>(null)
   const [researchElapsedSeconds, setResearchElapsedSeconds] = useState(0)
+  const [compareSelection, setCompareSelection] = useState<Record<string, ToolRecommendation[]>>({})
+  const [compareProblem, setCompareProblem] = useState<{ title: string; tools: ToolRecommendation[]; recommendation?: string } | null>(null)
+  const [adoptionProblem, setAdoptionProblem] = useState<{ title: string; tool: ToolRecommendation; recommendation?: string } | null>(null)
   const { solutionApps, suggestedProblems, setToolSearchStatus, toolSearchProgress, setToolSearchProgress } = useAppSession()
   const problems = useMemo(
     () => {
@@ -283,6 +472,23 @@ export default function App() {
       ?? toolGroups.find((candidate) => label.includes(candidate.problem.toLowerCase()) || candidate.problem.toLowerCase().includes(label))
     return group
   }
+  function toggleCompare(problem: ReportProblem | string, tool: ToolRecommendation) {
+    const key = problemKey(problem)
+    setCompareSelection((current) => {
+      const selected = current[key] ?? []
+      const exists = selected.some((item) => item.tool_name === tool.tool_name)
+      if (exists) return { ...current, [key]: selected.filter((item) => item.tool_name !== tool.tool_name) }
+      if (selected.length >= 4) return current
+      return { ...current, [key]: [...selected, tool] }
+    })
+  }
+  function selectAllForCompare(problem: ReportProblem | string, tools: ToolRecommendation[]) {
+    const key = problemKey(problem)
+    setCompareSelection((current) => ({
+      ...current,
+      [key]: (current[key]?.length ?? 0) >= Math.min(4, tools.length) ? [] : tools.slice(0, 4),
+    }))
+  }
 
   return (
     <section className="border-b border-border/70 px-5 py-8 lg:border-r lg:border-b-0 lg:px-10 lg:py-12">
@@ -308,6 +514,14 @@ export default function App() {
                 problem={problem}
                 tools={toolsForProblem(problem)?.tools ?? solutionApps}
                 finalRecommendation={toolsForProblem(problem)?.final_recommendation}
+                selectedTools={compareSelection[problemKey(problem)]}
+                onToggleCompare={(tool) => toggleCompare(problem, tool)}
+                onSelectAll={() => selectAllForCompare(problem, toolsForProblem(problem)?.tools ?? solutionApps)}
+                onCompare={() => setCompareProblem({
+                  title: problemTitle(problem),
+                  tools: compareSelection[problemKey(problem)] ?? [],
+                  recommendation: toolsForProblem(problem)?.final_recommendation,
+                })}
                 onFindTools={() => void findTools(problem)}
                 isSearching={activeProblem === problemTitle(problem)}
                 progress={activeProblem === problemTitle(problem) ? toolSearchProgress : null}
@@ -333,6 +547,27 @@ export default function App() {
             <p className="text-sm font-medium">No suggestions yet</p>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">Tell Halite what you want to improve to get tailored problems and tools.</p>
           </div>
+        )}
+        {compareProblem && (
+          <CompareDialog
+            problem={compareProblem.title}
+            tools={compareProblem.tools}
+            open
+            onOpenChange={(open) => { if (!open) setCompareProblem(null) }}
+            onAdopt={(tool) => {
+              setCompareProblem(null)
+              setAdoptionProblem({ title: compareProblem.title, tool, recommendation: compareProblem.recommendation })
+            }}
+          />
+        )}
+        {adoptionProblem && (
+          <AdoptionDialog
+            problem={adoptionProblem.title}
+            tool={adoptionProblem.tool}
+            recommendation={adoptionProblem.recommendation}
+            open
+            onOpenChange={(open) => { if (!open) setAdoptionProblem(null) }}
+          />
         )}
       </div>
     </section>
