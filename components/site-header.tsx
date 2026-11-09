@@ -2,6 +2,7 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { useAuth } from "@clerk/nextjs"
 import { AuthActions } from "@/components/auth-actions"
 
 const navigation = [
@@ -12,6 +13,8 @@ const navigation = [
 ]
 
 export function SiteHeader() {
+  const { isSignedIn } = useAuth()
+
   return (
     <header className="sticky top-0 z-50 flex h-14 shrink-0 items-center border-b border-border/70 bg-background/95 px-5 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:px-8">
       <div className="flex items-center">
@@ -21,7 +24,7 @@ export function SiteHeader() {
         </Link>
       </div>
       <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 md:flex">
-        {navigation.map((item) => (
+        {navigation.filter((item) => isSignedIn || !["/app", "/context"].includes(item.href)).map((item) => (
           <Link
             key={item.href}
             href={item.href}

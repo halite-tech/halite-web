@@ -1,8 +1,9 @@
 "use client"
 
 import { ArrowUpRight, Check, CircleNotch, Copy, Globe, X } from "@phosphor-icons/react"
-import { useUser } from "@clerk/nextjs"
+import { useAuth, useUser } from "@clerk/nextjs"
 import Image from "next/image"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAppSession } from "@/components/app-session"
 import {
@@ -370,6 +371,8 @@ function ProblemCard({
 }
 
 export default function App() {
+  const router = useRouter()
+  const { isLoaded, isSignedIn } = useAuth()
   const { user } = useUser()
   const [report, setReport] = useState<Report | null>(null)
   const [toolGroups, setToolGroups] = useState<ToolRecommendationGroup[]>([])
@@ -383,6 +386,10 @@ export default function App() {
   const [compareProblem, setCompareProblem] = useState<{ title: string; tools: ToolRecommendation[]; recommendation?: string } | null>(null)
   const [adoptionProblem, setAdoptionProblem] = useState<{ title: string; tool: ToolRecommendation; recommendation?: string } | null>(null)
   const { solutionApps, suggestedProblems, setToolSearchStatus, toolSearchProgress, setToolSearchProgress } = useAppSession()
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) router.replace("/")
+  }, [isLoaded, isSignedIn, router])
+
   const problems = useMemo(
     () => {
       if (!suggestedProblems.length) return report?.top_problems ?? []
@@ -409,6 +416,7 @@ export default function App() {
   }, [activeProblem])
 
   useEffect(() => {
+    if (!isLoaded || !isSignedIn) return
     if (window.location.search) window.history.replaceState(null, "", window.location.pathname)
     readContextFiles(user?.id ?? "local")
       .then((files) => {
@@ -431,7 +439,7 @@ export default function App() {
         }
       })
     return () => toolSearchController.current?.abort()
-  }, [setToolSearchProgress, user?.id])
+  }, [isLoaded, isSignedIn, setToolSearchProgress, user?.id])
 
   async function findTools(problem: ReportProblem | string) {
     if (toolSearchController.current) return
@@ -477,6 +485,8 @@ export default function App() {
       toolSearchController.current = null
     }
   }
+  if (!isLoaded || !isSignedIn) return null
+
   const dashboardTools = toolGroups.flatMap((group) => group.tools)
   const toolsForProblem = (problem: ReportProblem | string) => {
     const label = problemTitle(problem).toLowerCase()

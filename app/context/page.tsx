@@ -12,7 +12,8 @@ import {
   Trash,
   UploadSimple,
 } from "@phosphor-icons/react"
-import { useUser } from "@clerk/nextjs"
+import { useAuth, useUser } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react"
 import { SiteHeader } from "@/components/site-header"
 import { Button } from "@/components/ui/button"
@@ -78,6 +79,8 @@ function optimisticFiles(selected: File[]): StoredFile[] {
 }
 
 export default function ContextPage() {
+  const router = useRouter()
+  const { isLoaded, isSignedIn } = useAuth()
   const { user } = useUser()
   const storageUserId = user?.id ?? "local"
   const inputRef = useRef<HTMLInputElement>(null)
@@ -92,6 +95,11 @@ export default function ContextPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (isLoaded && !isSignedIn) router.replace("/")
+  }, [isLoaded, isSignedIn, router])
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return
     let active = true
     if (window.location.search) window.history.replaceState(null, "", window.location.pathname)
     listContextFiles(storageUserId)
@@ -113,7 +121,7 @@ export default function ContextPage() {
     return () => {
       active = false
     }
-  }, [storageUserId])
+  }, [isLoaded, isSignedIn, storageUserId])
 
   const visibleFiles = useMemo(
     () =>
@@ -123,6 +131,8 @@ export default function ContextPage() {
     [files, query, sortOrder]
   )
   const allVisibleSelected = visibleFiles.length > 0 && visibleFiles.every((file) => selectedFiles.has(file.localName))
+
+  if (!isLoaded || !isSignedIn) return null
 
   function toggleSelected(filename: string) {
     setSelectedFiles((current) => {
