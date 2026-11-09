@@ -6,11 +6,9 @@ import { Button } from "@/components/ui/button"
 
 export function ChatComposer({
   disabled = false,
-  clarity,
   onSend,
 }: {
   disabled?: boolean
-  clarity?: number
   onSend: (message: string) => void
 }) {
   const [message, setMessage] = useState("")
@@ -50,17 +48,6 @@ export function ChatComposer({
               <span className="sr-only">Attach file</span>
             </label>
             <input id="chat-attachment" type="file" className="sr-only" />
-            {clarity !== undefined && (
-              <div className="flex min-w-0 flex-1 items-center gap-2" aria-label={`${Math.round(clarity)}% clear`}>
-                <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
-                  <span
-                    className="block h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${Math.min(100, Math.max(0, clarity))}%` }}
-                  />
-                </span>
-                <span className="shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground">{Math.round(clarity)}% clear</span>
-              </div>
-            )}
           </div>
           <Button type="button" size="icon-sm" onClick={submit} disabled={disabled || !message.trim()} aria-label="Send message">
             <PaperPlaneTilt size={16} weight="fill" />

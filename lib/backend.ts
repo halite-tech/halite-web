@@ -1,6 +1,30 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000"
 
+let authTokenProvider: (() => Promise<string | null>) | null = null
+let cachedAuthToken: { value: string | null; expiresAt: number } | null = null
+let authTokenRequest: Promise<string | null> | null = null
+
+export function setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
+  authTokenProvider = provider
+  cachedAuthToken = null
+  authTokenRequest = null
+}
+
+async function getAuthToken() {
+  if (!authTokenProvider) return null
+  if (cachedAuthToken && cachedAuthToken.expiresAt > Date.now()) return cachedAuthToken.value
+  if (!authTokenRequest) {
+    authTokenRequest = authTokenProvider().then((value) => {
+      cachedAuthToken = { value, expiresAt: Date.now() + 30_000 }
+      return value
+    }).finally(() => {
+      authTokenRequest = null
+    })
+  }
+  return authTokenRequest
+}
+
 export type UploadFile = {
   name?: string
   filename?: string
@@ -16,6 +40,8 @@ export type UploadResponse = {
   files: UploadFile[]
   data_quality: Record<string, unknown>
 }
+
+export type ContextResponse = UploadResponse
 
 export type ReportProblem = {
   category: string
@@ -103,8 +129,6 @@ export type ChatSession = {
   session_id: string
   problem: string | null
   problem_version: number
-  understood: boolean
-  clarity: number
   known_facts: string[]
   open_questions: string[]
   messages: ChatMessage[]
@@ -253,7 +277,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   logBackend("→", `${method} ${path}`, describeRequest(init))
   let response: Response
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, init)
+    const token = await getAuthToken()
+    const headers = new Headers(init?.headers)
+    if (token) headers.set("Authorization", `Bearer ${token}`)
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers })
   } catch (error) {
     logBackend("←", `${method} ${path} network error`, error)
     throw error
@@ -281,6 +308,36 @@ export function uploadFiles(files: File[], profile?: Record<string, unknown>, da
   if (profile) body.append("profile", JSON.stringify(profile))
   if (datasetId) body.append("dataset_id", datasetId)
   return request<UploadResponse>("/uploads", { method: "POST", body })
+}
+
+export function uploadContextFiles(files: File[], profile?: Record<string, unknown>) {
+  const body = new FormData()
+  files.forEach((file) => body.append("files", file))
+  if (profile) body.append("profile", JSON.stringify(profile))
+  return request<ContextResponse>("/context/files", { method: "POST", body })
+}
+
+export function getContext() {
+  return request<ContextResponse>("/context")
+}
+
+export function deleteContextFiles(filenames: string[]) {
+  return request<ContextResponse>("/context/files", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(filenames),
+  })
+}
+
+export function analyzeContext(alpha = 0.7) {
+  return request<Report>(`/context/analyze?alpha=${alpha}`, { method: "POST" })
+}
+
+export function getContextReport(files: File[], alpha = 0.7) {
+  const body = new FormData()
+  files.forEach((file) => body.append("files", file))
+  body.append("alpha", String(alpha))
+  return request<Report>("/context/report", { method: "POST", body })
 }
 
 export function deleteDatasetFile(datasetId: string, filename: string) {
@@ -314,15 +371,20 @@ export function getTools(datasetId: string, alpha = 0.7, signal?: AbortSignal) {
 }
 
 export async function streamToolRecommendations(
-  datasetId: string,
   alpha: number,
   onProgress: (progress: ToolSearchProgress) => void,
   signal?: AbortSignal,
   problem?: string,
+  files: File[] = [],
 ) {
-  const problemQuery = problem ? `&problem=${encodeURIComponent(problem)}` : ""
-  const path = `/tools/stream?dataset_id=${encodeURIComponent(datasetId)}&alpha=${alpha}${problemQuery}`
-  const response = await fetch(`${API_BASE_URL}${path}`, { signal })
+  const body = new FormData()
+  files.forEach((file) => body.append("files", file))
+  body.append("alpha", String(alpha))
+  if (problem) body.append("problem", problem)
+  const path = "/context/tools/stream"
+  const token = await getAuthToken()
+  const headers = token ? { Authorization: `Bearer ${token}` } : undefined
+  const response = await fetch(`${API_BASE_URL}${path}`, { method: "POST", body, signal, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: string } | null
     throw new Error(body?.detail ?? `Backend request failed (${response.status})`)
@@ -352,11 +414,11 @@ export async function streamToolRecommendations(
   }
   throw new Error("Tool search stream ended before recommendations were ready")
 }
-export function createChatSession(datasetId?: string) {
+export function createChatSession() {
   return request<ChatSession>("/chat/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(datasetId ? { dataset_id: datasetId } : {}),
+    body: JSON.stringify({}),
   })
 }
 
@@ -378,9 +440,12 @@ export async function streamChatMessage(
   logBackend("→", `POST ${path}`, requestBody)
   let response: Response
   try {
+    const token = await getAuthToken()
+    const headers = new Headers({ "Content-Type": "application/json" })
+    if (token) headers.set("Authorization", `Bearer ${token}`)
     response = await fetch(`${API_BASE_URL}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(requestBody),
     })
   } catch (error) {

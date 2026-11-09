@@ -2,6 +2,7 @@
 
 import { Sparkle } from "@phosphor-icons/react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useAuth } from "@clerk/nextjs"
 import {
   createChatSession,
   getToolRecommendations,
@@ -67,6 +68,7 @@ function AssistantLoading({ title = "Thinking", progress, message }: { title?: s
 }
 
 export function ChatPanel() {
+  const { isLoaded: isAuthLoaded } = useAuth()
   const { setSolutionApps, setSuggestedProblems, toolSearchProgress, setToolSearchProgress } = useAppSession()
   const [session, setSession] = useState<ChatSession | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -93,10 +95,10 @@ export function ChatPanel() {
   }, [setSuggestedProblems, session?.problem, session?.problems])
 
   useEffect(() => {
+    if (!isAuthLoaded) return
     if (sessionInitializationRef.current) return
     sessionInitializationRef.current = true
-    const datasetId = new URLSearchParams(window.location.search).get("dataset_id")
-    createChatSession(datasetId ?? undefined)
+    createChatSession()
       .then((created) => {
         setSession(created)
         setMessages(created.messages)
@@ -106,7 +108,7 @@ export function ChatPanel() {
     return () => {
       if (pollingRef.current) window.clearInterval(pollingRef.current)
     }
-  }, [])
+  }, [isAuthLoaded])
 
   useEffect(() => {
     if (!session?.session_id || tools?.status !== "running") return
@@ -131,8 +133,7 @@ export function ChatPanel() {
     let activeSession = session
     try {
       if (!activeSession) {
-        const datasetId = new URLSearchParams(window.location.search).get("dataset_id")
-        activeSession = await createChatSession(datasetId ?? undefined)
+        activeSession = await createChatSession()
         setSession(activeSession)
         setMessages(activeSession.messages)
         setTools(activeSession.tools)
@@ -249,7 +250,7 @@ export function ChatPanel() {
         {tools?.status === "error" && <p className="text-xs text-destructive">{tools.error ?? "Tool research failed. Try sending another message."}</p>}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
-      <ChatComposer disabled={isSending || isSearchingTools} clarity={session?.problem ? session.clarity : undefined} onSend={sendMessage} />
+      <ChatComposer disabled={isSending || isSearchingTools} onSend={sendMessage} />
     </aside>
   )
 }

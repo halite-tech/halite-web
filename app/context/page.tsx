@@ -12,13 +12,14 @@ import {
   Trash,
   UploadSimple,
 } from "@phosphor-icons/react"
+import { useUser } from "@clerk/nextjs"
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react"
 import { SiteHeader } from "@/components/site-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { analyzeDataset, deleteDatasetFile, deleteDatasetFiles, getReport, uploadFiles, type UploadFile } from "@/lib/backend"
+import { deleteContextFiles as deleteStoredFiles, listContextFiles, saveContextFiles, type ContextFileMetadata } from "@/lib/context-storage"
 
-type StoredFile = UploadFile & { localName: string; size: number; lastModified: number; type: string }
+type StoredFile = ContextFileMetadata & { localName: string; domain?: string | null }
 type SortOrder = "newest" | "oldest"
 
 function iconForFile(name: string) {
@@ -51,65 +52,68 @@ function fileType(filename: string) {
   return filename.split(".").pop()?.toUpperCase() || "FILE"
 }
 
-function reportFiles(files: UploadFile[] = []): StoredFile[] {
+function reportFiles(files: ContextFileMetadata[] = []): StoredFile[] {
   return files.map((file, index) => {
-    const localName = file.name ?? file.filename ?? `Uploaded file ${index + 1}`
+    const localName = file.name || `Uploaded file ${index + 1}`
     return {
       ...file,
       localName,
       size: typeof file.size === "number" ? file.size : 0,
-      lastModified: typeof file.last_modified === "number" ? file.last_modified : Date.now(),
+      lastModified: typeof file.lastModified === "number" ? file.lastModified : Date.now(),
       type: typeof file.type === "string" ? file.type : "",
     }
   })
 }
 
+function optimisticFiles(selected: File[]): StoredFile[] {
+  const uploadedAt = Date.now()
+  return selected.map((file) => ({
+    name: file.name,
+    filename: file.name,
+    localName: file.name,
+    size: file.size,
+    lastModified: uploadedAt,
+    type: file.type,
+  }))
+}
+
 export default function ContextPage() {
+  const { user } = useUser()
+  const storageUserId = user?.id ?? "local"
   const inputRef = useRef<HTMLInputElement>(null)
   const [files, setFiles] = useState<StoredFile[]>([])
-  const [datasetId, setDatasetId] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [sortOrder, setSortOrder] = useState<SortOrder>("newest")
   const [isUploading, setIsUploading] = useState(false)
   const [deletingFile, setDeletingFile] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
   const [isDragActive, setIsDragActive] = useState(false)
-  const [status, setStatus] = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>("Loading your business context…")
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const currentDatasetId = params.get("dataset_id")
-    if (!currentDatasetId) return
-    queueMicrotask(() => {
-      setDatasetId(currentDatasetId)
-      setStatus("Loading your business context…")
-    })
-    getReport(currentDatasetId)
-      .catch((reason: Error) => {
-        if (reason.message.includes("dataset not analyzed yet")) {
-          setStatus("Rebuilding your business context…")
-          return analyzeDataset(currentDatasetId)
-        }
-        throw reason
-      })
-      .then((report) => {
-        setFiles(reportFiles(report.files))
-        setStatus(null)
+    let active = true
+    if (window.location.search) window.history.replaceState(null, "", window.location.pathname)
+    listContextFiles(storageUserId)
+      .then((context) => {
+        if (!active) return
+        setFiles(reportFiles(context))
+        setStatus(context.length ? null : "Upload your files to create your business context.")
       })
       .catch((reason: Error) => {
-        if (reason.message.includes("unknown dataset_id")) {
-          params.delete("dataset_id")
-          window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`)
-          setDatasetId(null)
+        if (!active) return
+        if (reason.message.includes("no files uploaded")) {
           setFiles([])
-          setStatus("The previous business context is no longer available. Upload your files again.")
+          setStatus("Upload your files to create your business context.")
           return
         }
         setError(reason.message)
         setStatus(null)
       })
-  }, [])
+    return () => {
+      active = false
+    }
+  }, [storageUserId])
 
   const visibleFiles = useMemo(
     () =>
@@ -140,22 +144,22 @@ export default function ContextPage() {
 
   async function uploadSelectedFiles(selected: File[]) {
     if (!selected.length) return
+    const optimistic = optimisticFiles(selected)
+    const optimisticByName = new Map(optimistic.map((file) => [file.localName, file]))
+    setFiles((current) => [
+      ...current.filter((file) => !optimisticByName.has(file.localName)),
+      ...optimistic,
+    ])
     setIsUploading(true)
     setError(null)
-    setStatus("Uploading and mapping your files…")
+    setStatus("Uploading your files…")
     try {
-      const ingest = await uploadFiles(selected, undefined, datasetId ?? undefined)
-      setDatasetId(ingest.dataset_id)
-      setStatus("Files uploaded. Running analysis…")
-      const report = await analyzeDataset(ingest.dataset_id)
-      setFiles(reportFiles(report.files ?? ingest.files))
+      await saveContextFiles(storageUserId, selected)
       setSelectedFiles(new Set())
-      const params = new URLSearchParams(window.location.search)
-      params.set("dataset_id", ingest.dataset_id)
-      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`)
-      window.dispatchEvent(new PopStateEvent("popstate"))
-      setStatus("Your business context is ready in the app.")
+      setStatus("Files uploaded and saved.")
     } catch (reason) {
+      const saved = await listContextFiles(storageUserId)
+      setFiles(reportFiles(saved))
       setError(reason instanceof Error ? reason.message : "Upload failed")
       setStatus(null)
     } finally {
@@ -164,21 +168,22 @@ export default function ContextPage() {
   }
 
   async function handleDeleteFile(file: StoredFile) {
-    if (!datasetId || deletingFile || !window.confirm(`Delete ${file.localName}?`)) return
+    if (deletingFile || !window.confirm(`Delete ${file.localName}?`)) return
+    const previousFiles = files
+    setFiles((current) => current.filter((candidate) => candidate.localName !== file.localName))
     setDeletingFile(file.localName)
     setError(null)
     setStatus(`Deleting ${file.localName}…`)
     try {
-      const dataset = await deleteDatasetFile(datasetId, file.localName)
-      const report = await analyzeDataset(datasetId)
-      setFiles(reportFiles(report.files ?? dataset.files))
+      await deleteStoredFiles(storageUserId, [file.localName])
       setSelectedFiles((current) => {
         const next = new Set(current)
         next.delete(file.localName)
         return next
       })
-      setStatus("File deleted. Your business context was updated.")
+      setStatus("File deleted.")
     } catch (reason) {
+      setFiles(previousFiles)
       setError(reason instanceof Error ? reason.message : "Delete failed")
       setStatus(null)
     } finally {
@@ -187,19 +192,20 @@ export default function ContextPage() {
   }
 
   async function handleDeleteSelected() {
-    if (!datasetId || deletingFile || selectedFiles.size === 0) return
+    if (deletingFile || selectedFiles.size === 0) return
     const filenames = Array.from(selectedFiles)
     if (!window.confirm(`Delete ${filenames.length} selected file${filenames.length === 1 ? "" : "s"}?`)) return
+    const previousFiles = files
+    setFiles((current) => current.filter((file) => !selectedFiles.has(file.localName)))
     setDeletingFile("selected")
     setError(null)
     setStatus(`Deleting ${filenames.length} selected files…`)
     try {
-      const dataset = await deleteDatasetFiles(datasetId, filenames)
-      const report = await analyzeDataset(datasetId)
-      setFiles(reportFiles(report.files ?? dataset.files))
+      await deleteStoredFiles(storageUserId, filenames)
       setSelectedFiles(new Set())
-      setStatus("Selected files deleted. Your business context was updated.")
+      setStatus("Selected files deleted.")
     } catch (reason) {
+      setFiles(previousFiles)
       setError(reason instanceof Error ? reason.message : "Bulk delete failed")
       setStatus(null)
     } finally {
@@ -330,7 +336,7 @@ export default function ContextPage() {
             )}
           </CardContent>
         </Card>
-        {datasetId && <p className="mt-4 text-xs text-muted-foreground">Context is available to the app for this session.</p>}
+        <p className="mt-4 text-xs text-muted-foreground">Your business context stays in this browser until you remove it.</p>
       </div>
     </main>
   )

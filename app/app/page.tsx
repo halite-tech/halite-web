@@ -1,13 +1,15 @@
 "use client"
 
 import { ArrowUpRight, CircleNotch, Globe } from "@phosphor-icons/react"
+import { useUser } from "@clerk/nextjs"
 import Image from "next/image"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAppSession } from "@/components/app-session"
 import { ToolDetailsDialog } from "@/components/tool-details-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { analyzeDataset, getReport, streamToolRecommendations, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
+import { getContextReport, streamToolRecommendations, type Report, type ReportProblem, type ToolRecommendation, type ToolRecommendationGroup } from "@/lib/backend"
+import { readContextFiles } from "@/lib/context-storage"
 
 function problemTitle(problem: ReportProblem | string) {
   return typeof problem === "string" ? problem : problem.label
@@ -166,6 +168,7 @@ function ProblemCard({
 }
 
 export default function App() {
+  const { user } = useUser()
   const [report, setReport] = useState<Report | null>(null)
   const [toolGroups, setToolGroups] = useState<ToolRecommendationGroup[]>([])
   const [toolsLoading, setToolsLoading] = useState(false)
@@ -176,7 +179,7 @@ export default function App() {
   const [researchElapsedSeconds, setResearchElapsedSeconds] = useState(0)
   const { solutionApps, suggestedProblems, setToolSearchStatus, toolSearchProgress, setToolSearchProgress } = useAppSession()
   const problems = useMemo(
-    () => (report?.top_problems?.length ? report.top_problems : suggestedProblems),
+    () => (suggestedProblems.length ? suggestedProblems : (report?.top_problems ?? [])),
     [report?.top_problems, suggestedProblems]
   )
 
@@ -190,24 +193,18 @@ export default function App() {
   }, [activeProblem])
 
   useEffect(() => {
-    const datasetId = new URLSearchParams(window.location.search).get("dataset_id")
-    if (!datasetId) return
-    getReport(datasetId)
-      .catch((reason: Error) => {
-        if (reason.message.includes("dataset not analyzed yet")) {
-          return analyzeDataset(datasetId)
-        }
-        throw reason
+    if (window.location.search) window.history.replaceState(null, "", window.location.pathname)
+    readContextFiles(user?.id ?? "local")
+      .then((files) => {
+        if (!files.length) throw new Error("no files uploaded")
+        return getContextReport(files)
       })
       .then((nextReport) => {
         setReport(nextReport)
       })
       .catch((reason: Error) => {
         if (reason.name !== "AbortError") {
-          if (reason.message.includes("unknown dataset_id")) {
-            const params = new URLSearchParams(window.location.search)
-            params.delete("dataset_id")
-            window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`)
+          if (reason.message.includes("no files uploaded")) {
             setReport(null)
             setToolGroups([])
             setToolsError(null)
@@ -218,11 +215,10 @@ export default function App() {
         }
       })
     return () => toolSearchController.current?.abort()
-  }, [setToolSearchProgress])
+  }, [setToolSearchProgress, user?.id])
 
   async function findTools(problem: ReportProblem | string) {
-    const datasetId = new URLSearchParams(window.location.search).get("dataset_id")
-    if (!datasetId || toolSearchController.current) return
+    if (toolSearchController.current) return
     const label = problemTitle(problem)
     const controller = new AbortController()
     toolSearchController.current = controller
@@ -234,8 +230,8 @@ export default function App() {
     setToolSearchStatus("running")
     setToolSearchProgress({ phase: "preparing", message: "Preparing tool research…", progress: 0 })
     try {
+      const files = await readContextFiles(user?.id ?? "local")
       const result = await streamToolRecommendations(
-        datasetId,
         report?.alpha ?? 0.7,
         (progress) => {
           if (progress.progress < maxProgress.current) return
@@ -244,6 +240,7 @@ export default function App() {
         },
         controller.signal,
         label,
+        files,
       )
       setToolGroups((current) => [
         ...current.filter((group) => group.problem !== result.recommendations[0]?.problem),
